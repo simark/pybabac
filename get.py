@@ -1,5 +1,6 @@
 import mechanicalsoup as ms
 import bos
+import sys
 import re
 import configparser
 
@@ -39,9 +40,9 @@ class PiecesGetter:
         login_response = self._browser.submit(
             login_form, url=PiecesGetter.BASE_URL)
 
-        profile = login_response.soup.find(id='#users-profile-core')
+        profile = login_response.soup.find(id='users-profile-core')
         if not profile:
-			raise Exception('Could not log in.')
+            raise Exception('Could not log in.')
 
     def _make_search(self, numero_piece):
         numero_piece = str(numero_piece)
@@ -101,4 +102,7 @@ if __name__ == '__main__':
     parser.read('babac.conf')
 
     g = PiecesGetter(parser['babac']['username'], parser['babac']['password'])
-    print(g.get_piece('60-036'))
+
+    for num in sys.argv[1:]:
+        # print(num)
+        print(g.get_piece(num))

@@ -6,6 +6,6 @@ class Piece:
 		self.prix = ""
 
 	def __str__(self):
-		return "{} {} {}".format(self.numero, self.nom, self.prix)
+		return "{}|{}|{}".format(self.numero, self.nom, self.prix)
 
 
