@@ -1,97 +1,104 @@
-import requests
-import bs4
+import mechanicalsoup as ms
 import bos
 import re
 import configparser
 
+
+class PieceNotFoundException(Exception):
+
+    def __init__(self, numero, nb_resultats):
+        self._numero = numero
+        self._nb_resultats = nb_resultats
+
+    def __str__(self):
+        return 'Aucun candidat valide trouvé dans les résultats de recherche pour {} (sur {} candidats).'.format(self._numero, self._nb_resultats)
+
+
 class PiecesGetter:
-	LOGIN_POST_URL = 'http://cyclebabac.com/members/component/users/'
-	USER_AGENT = 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:28.0) Gecko/20100101 Firefox/28.0'
-	SEARCH_FORMAT = 'http://www.cyclebabac.com/members/component/search/?searchword={}'
-	BASE_URL = 'http://cyclebabac.com'
+    LOGIN_POST_URL = 'http://cyclebabac.com/members/component/users/'
+    USER_AGENT = 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:28.0) Gecko/20100101 Firefox/28.0'
+    SEARCH_FORMAT = 'http://www.cyclebabac.com/component/search/?searchword={}'
+    BASE_URL = 'http://www.cyclebabac.com'
+    LOGIN_URL = 'http://www.cyclebabac.com/log-in.html'
 
-	def __init__(self, username, password):
-		self._username = username
-		self._password = password
+    def __init__(self, username, password):
+        self._username = username
+        self._password = password
 
-		self._init()
-		self._login()
+        self._init()
 
-	def _init(self):
-		self._session = requests.Session()
-		self._session.headers.update({
-			'User-Agent': PiecesGetter.USER_AGENT,
-		})
+    def _init(self):
+        # Instantiate browser and log in
+        self._browser = ms.Browser()
+        self._browser.session.headers.update(
+            {'User-Agent': PiecesGetter.USER_AGENT})
+        login_page = self._browser.get(PiecesGetter.LOGIN_URL)
+        login_form = login_page.soup.find('form', attrs={'name': 'ialLogin'})
+        login_form.select('#userTxt')[0]['value'] = self._username
+        login_form.select('#passTxt')[0]['value'] = self._password
+        login_response = self._browser.submit(
+            login_form, url=PiecesGetter.BASE_URL)
 
-	def _login(self):
-		r = self._session.get(PiecesGetter.LOGIN_POST_URL)
-		soup = bs4.BeautifulSoup(r.text)
-		form = soup.find('form', id='login-form')
-		super_secret_stuff = form.find('input', value='1')['name']
+        profile = login_response.soup.find(id='#users-profile-core')
+        if not profile:
+			raise Exception('Could not log in.')
 
-		login_data = {
-			'username': self._username,
-			'password': self._password,
-			'Submit': 'Log+in',
-			'option': 'com_users',
-			'task': 'user.login',
-			'return': 'aW5kZXgucGhwP0l0ZW1pZD01NzI=',
-			super_secret_stuff: '1',
-		}
+    def _make_search(self, numero_piece):
+        numero_piece = str(numero_piece)
 
-		r = self._session.post(PiecesGetter.LOGIN_POST_URL, data = login_data)
+        url = PiecesGetter.SEARCH_FORMAT.format(numero_piece)
+        search_results = self._browser.get(url)
+        links = search_results.soup.select('dl.search-results a')
 
-	def _make_search(self, numero_piece):
-		url = PiecesGetter.SEARCH_FORMAT.format(numero_piece)
-		r = self._session.get(url)
-		soup = bs4.BeautifulSoup(r.text)
-		dts = soup.find_all('dt', attrs = {'class': 'result-title'})
-		res = []
-		for dt in dts:
-			href = dt.find('a')['href']
+        found = False
+        for link in links:
+            if numero_piece in link.text:
+                found = True
+                break
 
-			res.append(PiecesGetter.BASE_URL + href)
-		return res
+        if not found:
+            raise PieceNotFoundException(numero_piece, len(links))
 
-	def _get_piece(self, url):
-		piece = bos.Piece()
+        return PiecesGetter.BASE_URL + link['href']
 
-		r = self._session.get(url)
-		soup = bs4.BeautifulSoup(r.text)
+    def _get_piece(self, url):
+        page_piece = self._browser.get(url)
+        piece = bos.Piece()
 
-		details_div = soup.find('div', attrs = {'class': 'productdetails-view'})
+        details_div = page_piece.soup.find(
+            'div', attrs={'class': 'productdetails-view'})
 
-		piece.nom = details_div.find('h1').text
+        piece.nom = details_div.find('h1').text
 
-		prix = details_div.find('span', attrs = {'class': 'PricesalesPrice'}).text.strip()
-		match = re.match(r'\$([0-9]+)\.([0-9]{2})', prix)
-		if not match:
-			raise Exception('Price not found/wrong price format: {}'.format(prix))
-		piasses = int(match.group(1))
-		cennes = int(match.group(2))
+        prix = details_div.find('span', attrs={'class': 'PricesalesPrice'})
 
-		piece.prix = 100 * piasses + cennes
+        if not prix:
+            raise Exception('Price not found on {}'.format(url))
 
-		return piece
+        prix = prix.text.strip()
+        match = re.match(r'\$([0-9]+)\.([0-9]{2})', prix)
 
+        if not match:
+            raise Exception(
+                'Price not found/wrong price format: {}'.format(prix))
 
-	def get_piece(self, numero_piece):
-		hrefs = self._make_search(numero_piece)
-		if len(hrefs) == 0:
-			raise Exception("0 result for numero piece {}".format(numero_piece))
-		elif len(hrefs) > 1:
-			raise Exception("More than 1 result for numero piece {}".format(numero_piece))
+        piasses = int(match.group(1))
+        cennes = int(match.group(2))
 
-		url = hrefs[0]
+        piece.prix = 100 * piasses + cennes
 
-		piece = self._get_piece(url)
-		piece.numero = numero_piece
+        return piece
 
-		return piece
+    def get_piece(self, numero_piece):
+        href = self._make_search(numero_piece)
+        piece = self._get_piece(href)
+        piece.numero = numero_piece
+
+        return piece
 
 if __name__ == '__main__':
-	parser = configparser.ConfigParser()
-	parser.read('babac.conf')
+    parser = configparser.ConfigParser()
+    parser.read('babac.conf')
 
-	g = PiecesGetter(parser['babac']['username'], parser['babac']['password'])
-	print(g.get_piece('60-036'))
+    g = PiecesGetter(parser['babac']['username'], parser['babac']['password'])
+    print(g.get_piece('60-036'))
