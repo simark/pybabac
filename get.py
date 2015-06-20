@@ -5,9 +5,10 @@ import re
 import configparser
 import time
 import shelve
+import os
 
-PYBABAC_CONF = '/home/biciklo/.pybabac'
-CACHE_FILENAME = '/home/biciklo/.pybabac-cache'
+PYBABAC_CONF = os.path.expanduser('~/.pybabac')
+CACHE_FILENAME = os.path.expanduser('~/.pybabac-cache')
 
 
 class PieceNotFoundException(Exception):
